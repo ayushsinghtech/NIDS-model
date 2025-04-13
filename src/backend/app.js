@@ -11,6 +11,18 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(bodyParser.json());
 
+
+const axios = require('axios');
+const fs = require('fs');
+
+const pcapData = fs.readFileSync('packet.pcap');
+axios.post('http://localhost:5000/predict', pcapData, {
+  headers: { 'Content-Type': 'application/octet-stream' }
+}).then(res => {
+  console.log('Result:', res.data);
+});
+
+
 // Dummy API Routes
 app.get("/", (req, res) => {
   res.send({ message: "Welcome to the test API!" });

@@ -1,24 +1,9 @@
-"""
-Flask application factory.
-"""
+# app/__init__.py
 from flask import Flask
-from config import Config
 
-def create_app(config_class=Config):
-    """
-    Create and configure the Flask application.
-    
-    Args:
-        config_class: Configuration class for the application
-        
-    Returns:
-        Configured Flask application
-    """
+def create_app():
     app = Flask(__name__)
-    app.config.from_object(config_class)
-    
-    # Register blueprints
-    from app.routes.prediction_routes import prediction_bp
-    app.register_blueprint(prediction_bp)
-    
+    from app.routes import api
+    # Register the blueprint with a URL prefix (here "/api")
+    app.register_blueprint(api, url_prefix="/api")
     return app
