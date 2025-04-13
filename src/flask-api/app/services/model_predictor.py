@@ -1,4 +1,3 @@
-# app/services/model_predictor.py
 import joblib
 from app.config import MODEL_PATH
 

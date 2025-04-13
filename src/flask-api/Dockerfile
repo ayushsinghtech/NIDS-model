@@ -1,13 +1,12 @@
+# Dockerfile
 FROM python:3.9-slim
 
-# Install system dependencies: gcc and libpcap-dev.
-# Removed docker.io as it is not needed within the container.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        gcc \
-        libpcap-dev && \
-    rm -rf /var/lib/apt/lists/*
-
+# Install system dependencies including packet processing tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    tcpdump \
+    libpcap-dev \
+    python3-dev
 # Set the working directory inside the container
 WORKDIR /app
 
