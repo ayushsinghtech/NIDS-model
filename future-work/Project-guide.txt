@@ -1,0 +1,443 @@
+To run your Flask app again if you accidentally close your terminal or need to restart it, follow these simple steps:
+
+### 1. Open a new terminal window.
+   
+### 2. Navigate back to your Flask project directory:
+   ```bash
+   cd /mnt/e/NIDS-model/src/flask-api
+   ```
+
+### 3. Activate the virtual environment:
+   ```bash
+   source venv/bin/activate
+   ```
+
+### 4. Start the Flask application:
+   ```bash
+   python run.py
+   ```
+
+This will start the Flask app, and it should be accessible again at `http://127.0.0.1:5000` (or other relevant IP addresses) as you saw earlier.
+
+### **Note**: If you're running this in the background, make sure you're using something like `nohup`, `screen`, or `tmux` (as explained earlier) to keep it running even if the terminal is closed.
+
+Let me know if you need any further help!
+
+
+docker run -it --rm flask-ids ls -la /app/models
+
+docker run -it --rm `
+  -v "${PWD}\data:/data" `
+  -v "${PWD}\models:/app/models" `
+  -v "//var/run/docker.sock:/var/run/docker.sock" `
+  -p 5000:5000 `
+  flask-ids
+
+
+docker run -it --rm \
+  -v "${PWD}/data:/data" \
+  -v "E:/NIDS-model/src/flask-api/models:/app/models" \
+  -v "//var/run/docker.sock:/var/run/docker.sock" \
+  -p 5000:5000 \
+  flask-ids
+
+---
+
+## **New Overall Workflow**
+
+1. **Node.js Client**  
+   - Captures network packets and sends the raw bytes (via HTTP POST) to your Flask API.
+
+2. **Flask API (Python) Container/Instance**  
+   - Receives the raw packet data and saves it as a temporary PCAP file.
+   - Uses the Python-based CICFlowMeter package (installed via pip) to convert the PCAP file to a CSV file containing flow features.
+   - Loads the CSV file, preprocesses it to match your training data format, and runs the ML model prediction.
+   - Applies threshold logic and returns a JSON response (e.g., MALICIOUS, BENIGN, or UNKNOWN).
+   - Cleans up temporary files.
+
+3. **ML Prediction**  
+   - The ML model (loaded from a pickle file) uses the preprocessed CSV features to classify the network traffic.
+
+---
+
+## **New Project Folder Structure**
+
+```
+your_project/
+│
+├── app/                        # Flask application code
+│   ├── __init__.py             # App factory (registers blueprints)
+│   ├── routes.py               # /predict endpoint (handles incoming POST requests)
+│   ├── config.py               # Configuration (paths, thresholds, etc.)
+│   └── services/               
+│       ├── pcap_saver.py       # Saves raw packet data to a PCAP file
+│       ├── cicflow_converter.py# Converts PCAP to CSV using the Python cicflowmeter package
+│       ├── csv_loader.py       # Loads and preprocesses the CSV file from the conversion
+│       ├── model_predictor.py  # Loads the ML model and performs predictions
+│       └── cleaner.py          # Cleans up temporary files (PCAP and CSV)
+│
+├── data/                      # Shared data directory for temporary files
+│   ├── input.pcap             # (Created at runtime by the Flask API)
+│   └── output/                # Directory where the CSV file will be written
+│
+├── models/                    # Pre-trained model artifacts
+│   ├── model.pkl              # Your ML model
+│   └── scaler.pkl             # (Optional) Preprocessing scaler
+│
+├── Dockerfile                 # Dockerfile for the Flask app container (if deploying in Docker)
+├── docker-compose.yml         # (Optional) Orchestrates the Flask container and shared volumes
+├── run.py                     # Flask app entry point (if running outside Docker)
+├── requirements.txt           # Python dependencies (Flask, cicflowmeter, pandas, joblib, etc.)
+└── README.md                  # Project overview and documentation
+```
+
+---
+
+## **Key Points About This Structure**
+
+- **app/**:  
+  Contains all Flask-related code. The **services/** subfolder splits responsibilities for saving PCAP files, converting them using the Python cicflowmeter package, loading and preprocessing CSV output, running the model prediction, and cleaning up.
+
+- **data/**:  
+  Acts as the shared folder where incoming PCAP files are saved and where the conversion tool writes the CSV file.
+
+- **models/**:  
+  Contains your pre-trained model (and optionally a scaler). These files are loaded by the model_predictor module.
+
+- **Dockerfile & docker-compose.yml** (Optional):  
+  You can containerize your Flask API. In this new setup, the Dockerfile will include installing the Python cicflowmeter package (via pip) so that no external Java JAR or Docker run command is needed for conversion.
+
+- **requirements.txt**:  
+  Will list your Python packages, including:
+  - Flask
+  - cicflowmeter (the Python package from PyPI)
+  - pandas
+  - joblib
+  - (others as needed)
+
+---
+
+## **New Workflow in Words**
+
+1. The Node.js client sends raw packet data to your Flask API.
+2. The Flask API (in `routes.py`) calls `pcap_saver.save_packet` to write the raw data to `data/input.pcap`.
+3. Next, `cicflow_converter.py` is invoked to run the Python cicflowmeter command (e.g., via a subprocess call or using its API if available) to convert `input.pcap` into a CSV file saved in `data/output`.
+4. Then, `csv_loader.py` loads and preprocesses the CSV file (e.g., dropping unwanted columns, handling missing values, scaling features if necessary) to prepare the data for prediction.
+5. The preprocessed data is passed to `model_predictor.py`, which loads the ML model from `models/model.pkl` (and uses `scaler.pkl` if applicable) to generate a prediction and probability.
+6. Based on thresholds defined in `config.py`, the API determines the final status (MALICIOUS, BENIGN, or UNKNOWN) and sends that in the JSON response.
+7. Finally, `cleaner.py` is called to remove the temporary files (both the PCAP file and the generated CSV).
+
+---
+
+Below is a complete example of your new project built entirely in Python. This version uses the Python-based CICFlowMeter (installed from PyPI) to convert PCAP files to CSV without needing a separate Java container. The functionality remains the same: the Node.js client sends raw packet data to the Flask API, which saves the data as a PCAP file, converts it to CSV, pre‑processes the CSV, runs ML prediction, applies threshold logic, cleans up, and returns a JSON response.
+
+Below are the recommended folders, files, and their code.
+
+---
+
+## **Final Project Folder Structure**
+
+```
+your_project/
+│
+├── app/                        # Flask application code
+│   ├── __init__.py             # Flask app factory
+│   ├── routes.py               # /predict endpoint (registered with URL prefix "/api")
+│   ├── config.py               # Configuration (paths, thresholds, etc.)
+│   └── services/               
+│       ├── pcap_saver.py       # Saves raw packet data to a PCAP file
+│       ├── cicflow_converter.py# Converts PCAP to CSV using the Python cicflowmeter package
+│       ├── csv_loader.py       # Loads and preprocesses the CSV file
+│       ├── model_predictor.py  # Loads the ML model and makes a prediction
+│       └── cleaner.py          # Cleans up temporary files (PCAP and CSV)
+│
+├── data/                      # Shared data directory for temporary files
+│   ├── input.pcap             # (Created at runtime by the Flask API)
+│   └── output/                # Directory where the CSV file will be written
+│
+├── models/                    # Pre-trained model artifacts
+│   ├── model.pkl              # Your ML model
+│   └── scaler.pkl             # (Optional) Preprocessing scaler
+│
+├── Dockerfile                 # Dockerfile for the Flask app container
+├── docker-compose.yml         # (Optional) To orchestrate your Flask container and shared volumes
+├── run.py                     # Flask app entry point
+├── requirements.txt           # Python dependencies
+└── README.md                  # Project overview and documentation
+```
+
+---
+
+## **File Contents**
+
+### **1. app/config.py**
+
+```python
+# app/config.py
+# Paths relative to the container's (or local) file system.
+INPUT_PCAP = "/data/input.pcap"
+OUTPUT_CSV = "/data/output/converted.csv"
+MODEL_PATH = "models/model.pkl"
+SCALER_PATH = "models/scaler.pkl"  # Optional: only if you have one
+
+# Prediction thresholds (adjust according to your training)
+THRESHOLD_LOW = 0.4
+THRESHOLD_HIGH = 0.6
+```
+
+---
+
+### **2. app/__init__.py**
+
+```python
+# app/__init__.py
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+    from app.routes import api
+    # Register the blueprint with a URL prefix (here "/api")
+    app.register_blueprint(api, url_prefix="/api")
+    return app
+```
+
+---
+
+### **3. app/routes.py**
+
+```python
+# app/routes.py
+from flask import Blueprint, request, jsonify
+from .services import pcap_saver, cicflow_converter, csv_loader, model_predictor, cleaner
+from .config import INPUT_PCAP, OUTPUT_CSV, THRESHOLD_LOW, THRESHOLD_HIGH
+
+api = Blueprint("api", __name__)
+
+@api.route("/predict", methods=["POST"])
+def predict():
+    try:
+        # 1. Save the incoming raw packet data as a PCAP file.
+        pcap_saver.save_packet(request.data, INPUT_PCAP)
+        
+        # 2. Convert the PCAP file to CSV using the Python cicflowmeter package.
+        cicflow_converter.convert(INPUT_PCAP, OUTPUT_CSV)
+        
+        # 3. Load and preprocess the CSV to match your training pipeline.
+        df = csv_loader.load_and_preprocess(OUTPUT_CSV)
+        if df.empty:
+            return jsonify({"status": "UNKNOWN", "reason": "No valid flows found"}), 400
+        
+        # 4. Predict using the ML model.
+        prediction, proba = model_predictor.predict(df)
+        
+        # 5. Determine the final status.
+        if proba > THRESHOLD_HIGH:
+            status = "MALICIOUS"
+        elif proba < THRESHOLD_LOW:
+            status = "BENIGN"
+        else:
+            status = "UNKNOWN"
+        
+        # 6. Clean up temporary files.
+        cleaner.cleanup([INPUT_PCAP, OUTPUT_CSV])
+        
+        return jsonify({"status": status, "probability": float(proba)})
+    
+    except Exception as e:
+        return jsonify({"error": "Processing failed", "details": str(e)}), 500
+```
+
+---
+
+### **4. app/services/pcap_saver.py**
+
+```python
+# app/services/pcap_saver.py
+def save_packet(data, save_path):
+    with open(save_path, "wb") as f:
+        f.write(data)
+```
+
+---
+
+### **5. app/services/cicflow_converter.py**
+
+> **Note:**  
+> This code uses the Python package `cicflowmeter` (install via `pip install cicflowmeter`).  
+> The command-line interface provided by the package is assumed to be available as an executable command called `cicflowmeter`.
+
+```python
+# app/services/cicflow_converter.py
+import subprocess
+
+def convert(pcap_path, csv_path):
+    # Run the cicflowmeter command to convert PCAP to CSV.
+    # The command usage is: cicflowmeter -f <pcap> -c <csv>
+    subprocess.run(["cicflowmeter", "-f", pcap_path, "-c", csv_path], check=True)
+```
+
+---
+
+### **6. app/services/csv_loader.py**
+
+```python
+# app/services/csv_loader.py
+import pandas as pd
+import os
+import joblib
+from app.config import SCALER_PATH
+
+def load_and_preprocess(csv_path):
+    if not os.path.exists(csv_path):
+        return pd.DataFrame()
+    
+    df = pd.read_csv(csv_path)
+    
+    # Drop columns not used during training (adjust these names as needed)
+    drop_cols = ["Flow ID", "Src IP", "Dst IP", "Timestamp", "Label"]
+    df.drop(columns=drop_cols, errors="ignore", inplace=True)
+    
+    # Drop rows with missing values
+    df.dropna(inplace=True)
+    
+    # (Optional) Apply scaling if a scaler is provided
+    if os.path.exists(SCALER_PATH):
+        scaler = joblib.load(SCALER_PATH)
+        df[df.columns] = scaler.transform(df[df.columns])
+    
+    return df
+```
+
+---
+
+### **7. app/services/model_predictor.py**
+
+```python
+# app/services/model_predictor.py
+import joblib
+from app.config import MODEL_PATH
+
+# Load the pre-trained model
+model = joblib.load(MODEL_PATH)
+
+def predict(df):
+    # Assuming binary classification and that predict_proba returns the probability for class 1 at index 1.
+    proba = model.predict_proba(df)[0][1]
+    pred = model.predict(df)[0]
+    return pred, proba
+```
+
+---
+
+### **8. app/services/cleaner.py**
+
+```python
+# app/services/cleaner.py
+import os
+
+def cleanup(files):
+    for f in files:
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+        except Exception as e:
+            print("Error deleting file:", f, e)
+```
+
+---
+
+### **9. run.py**
+
+```python
+# run.py
+from app import create_app
+
+app = create_app()
+
+if __name__ == "__main__":
+    # Run the Flask app on 0.0.0.0 so it's accessible from Docker (if needed)
+    app.run(debug=True, host="0.0.0.0", port=5000)
+```
+
+---
+
+### **10. requirements.txt**
+
+```plaintext
+Flask==2.2.2
+pandas==1.5.2
+joblib==1.2.0
+cicflowmeter
+```
+
+*(You can specify a version for `cicflowmeter` if needed.)*
+
+---
+
+### **11. Dockerfile (for Flask App Container)**
+
+Place this file in the project root (i.e., alongside `run.py` and `requirements.txt`):
+
+```dockerfile
+# Dockerfile
+FROM python:3.9-slim
+
+# Install system dependencies (if needed)
+RUN apt-get update && apt-get install -y --no-install-recommends gcc
+
+# Set the working directory
+WORKDIR /app
+
+# Copy application code and dependencies
+COPY app/ ./app/
+COPY run.py .
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create necessary directories for data and models (if they don't exist)
+RUN mkdir -p /data /models
+
+# Expose port 5000
+EXPOSE 5000
+
+# Run the Flask app
+CMD ["python", "run.py"]
+```
+
+---
+
+### **12. docker-compose.yml** (Optional)
+
+This file lets you easily run your Flask container with mounted volumes:
+
+```yaml
+version: "3.8"
+services:
+  flask:
+    build: .
+    container_name: flask_app
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/data
+      - ./models:/models
+```
+
+---
+
+## **Summary of the New Python CICFlowMeter Workflow**
+
+1. **Node.js Client** sends raw packet data to your Flask API.
+2. **Flask API** (in its container or local environment):
+   - Saves the raw data as `/data/input.pcap` using `pcap_saver.py`.
+   - Converts the PCAP to a CSV file by calling `cicflow_converter.py`, which runs the Python-based `cicflowmeter` command (installed via pip) to create `/data/output/converted.csv`.
+   - Loads and preprocesses the CSV using `csv_loader.py` (dropping unwanted columns, handling missing values, and applying scaling if needed).
+   - Passes the processed data to `model_predictor.py` to run the ML model prediction.
+   - Applies threshold logic to return a JSON result (MALICIOUS, BENIGN, or UNKNOWN).
+   - Cleans up temporary files via `cleaner.py`.
+3. **The Flask API** then returns the prediction response to the client.
+
+---
+
